@@ -1,0 +1,171 @@
+Index: official-wordpress-events.php
+===================================================================
+--- official-wordpress-events.php	(revision 1089)
++++ official-wordpress-events.php	(working copy)
+@@ -5,7 +5,6 @@
+ Version:     0.1
+ Author:      WordPress.org Meta Team
+ */
+-
+ class Official_WordPress_Events {
+ 	const WORDCAMP_API_BASE_URL = 'http://central.wordcamp.org/wp-json.php';
+ 	const MEETUP_API_BASE_URL   = 'https://api.meetup.com/';
+@@ -26,6 +25,9 @@
+ 	 * Constructor
+ 	 */
+ 	public function __construct() {
++		add_action( 'wp_ajax_official_wordpress_events_infinite_scroll' ,  array( $this, 'infinite_scroll_func' ) );
++		add_action( 'wp_ajax_nopriv_official_wordpress_events_infinite_scroll' ,  array( $this, 'infinite_scroll_func' ) );
++		add_action( 'wp_enqueue_scripts' , array( $this, 'owe_include_essentials' ) );
+ 		add_shortcode( 'official_wordpress_events', array( $this, 'render_events' ) );
+ 	}
+ 
+@@ -53,6 +55,44 @@
+ 	}
+ 
+ 	/**
++        * Infinite Scroll functionality added
++        */
++        public function infinite_scroll_func() {
++                $offset =  $_POST[ 'offset' ];
++		if( ! is_numeric( $offset ) ) {
++			wp_send_json_error();
++			return;
++		}
++                $offset = $offset + 1;
++                if ( $tempEvents = $this->get_meetup_events( $offset ) ) {
++                        usort( $tempEvents, array( $this, 'sort_events' ) );
++			$final_ans_array = array();
++                        foreach ( $tempEvents as $event ) :
++				$elem_array = array(
++					'event_url'	     =>  esc_attr( esc_url( $event->url ) ),
++					'event_title'        =>  esc_html( $event->title ),
++					'event_start_time'   =>  esc_html( date( 'l, F jS | g:i a', (int) $event->start_timestamp ) ),
++					'event_location'     =>  esc_html( $event->location ),
++				);
++                		array_push( $final_ans_array , $elem_array );
++		         endforeach;
++                }
++		else {
++			wp_send_json_error();
++			return;
++		}
++                wp_send_json_success( json_encode( $final_ans_array ) );
++        }
++	
++	/**
++	* Footer action class for using wordpress templates
++	*/
++	public function owe_include_essentials() {
++		wp_register_script( 'official_wp_events_infinite_load', plugins_url() . "/official-wordpress-events/template-event.js" , array( 'wp-util' ), null );
++		wp_enqueue_script( 'official_wp_events_infinite_load' );
++	}
++
++	/**
+ 	 * Sort events based on start timestamp 
+ 	 * 
+ 	 * This is a callback for usort()
+@@ -105,9 +145,10 @@
+ 	/**
+ 	 * Get WordPress meetups from the Meetup.com API
+ 	 *
++	 * @param $offset
+ 	 * @return array
+ 	 */
+-	protected function get_meetup_events() {
++	protected function get_meetup_events( $offset = 0 ) {
+ 		$events = array();
+ 
+ 		if ( ! defined( 'MEETUP_API_KEY' ) || ! MEETUP_API_KEY || ! $groups = $this->get_meetup_group_ids() ) {
+@@ -115,10 +156,11 @@
+ 		}
+ 		
+ 		$response = $this->remote_get( sprintf(
+-			'%s2/events?group_id=%s&time=0,1m&page=%d&key=%s',
++			'%s2/events?group_id=%s&time=0,4m&page=%d&offset=%d&key=%s',
+ 			self::MEETUP_API_BASE_URL,
+ 			implode( ',', $groups ),
+ 			self::POSTS_PER_PAGE,
++			$offset,
+ 			MEETUP_API_KEY
+ 		) );
+ 
+Index: template-event.js
+===================================================================
+--- template-event.js	(revision 0)
++++ template-event.js	(working copy)
+@@ -0,0 +1,34 @@
++var official_wp_event_js = function() {
++	var flag    	   = 0,
++	    offset	   = 0,
++	    singleTemplate = wp.template( "single-event" );
++	function async_infinite_load( ajaxUrl ) {
++		if( flag == 0 ) {
++			flag = flag + 1;
++	       	        jQuery.post (
++        	       	        ajaxUrl,
++                	       	{
++	                               	'action'  : 'official_wordpress_events_infinite_scroll',
++        	                        'offset'  :  offset,
++       	        	        },
++	               	        function( response ) {
++					if ( response.success ) {
++						var data = jQuery.parseJSON( response.data );
++						jQuery.each( data , function( key , value ) {
++							jQuery( '#ofe_events ul' ).append( singleTemplate( value ) );
++						} );
++						offset = offset + 1;
++					}
++					else {
++						jQuery( '#ofe_events ul' ).append( 'Error Occured' );
++					}
++				flag = 0;
++       		                }
++			);
++		}
++	}
++	return {
++		load : async_infinite_load
++	}
++}();
++
+
+Property changes on: template-event.js
+___________________________________________________________________
+Added: svn:executable
+## -0,0 +1 ##
++*
+\ No newline at end of property
+Index: template-events.php
+===================================================================
+--- template-events.php	(revision 1089)
++++ template-events.php	(working copy)
+@@ -1,3 +1,7 @@
++<script>
++	var ajaxurl = "<?php echo admin_url( 'admin-ajax.php' ); ?>";
++</script>
++
+ <div id="ofe_events">
+ 	<ul>
+ 		<?php foreach ( $events as $event ) : ?>
+@@ -13,5 +17,20 @@
+ 			</li>
+ 
+ 		<?php endforeach; ?>
++		<script type="text/html" id="tmpl-single-event">
++					<li>
++						<a href="{{data.event_url}}">
++							{{{data.event_title}}}
++						</a><br />
++
++						{{data.event_start_time}}
++
++						{{data.event_location}}
++					</li>
++		</script>
+ 	</ul>
++	<div id="load_more_events">
++		<a href="javascript:official_wp_event_js.load(ajaxurl)">Load More Events</a>
++	</div>
++
+ </div> <!-- end #ofe_events -->
