@@ -1,0 +1,19 @@
+Index: customize-controls.js
+===================================================================
+--- customize-controls.js	(revision 31157)
++++ customize-controls.js	(working copy)
+@@ -2063,7 +2063,13 @@
+ 				instance.deferred.embedded.done( function () {
+ 					// Wait until the preview has activated and so active panels, sections, controls have been set
+ 					api.previewer.deferred.active.done( function () {
+-						instance.focus();
++						if( api.settings.autofocus[ type ] === "widgets" ) {
++							instance.container.css( { 'top' : '-300px' } );
++							$( '#customize-header-actions' ).on( 'click keydown', '.control-panel-back', function( event ) {
++								instance.container.css({'top':''});
++                                                        });
++                                                }
++					instance.focus();
+ 					});
+ 				});
+ 			}

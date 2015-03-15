@@ -1,0 +1,26 @@
+Index: widgets.js
+===================================================================
+--- widgets.js	(revision 31157)
++++ widgets.js	(working copy)
+@@ -119,6 +119,7 @@
+ 			handle: '> .widget-top > .widget-title',
+ 			cursor: 'move',
+ 			distance: 2,
++			helper: 'clone',
+ 			containment: 'document',
+ 			start: function( event, ui ) {
+ 				var height, $this = $(this),
+@@ -223,7 +224,12 @@
+ 				if ( $sender.attr('id').indexOf('orphaned_widgets') > -1 && ! $sender.children('.widget').length ) {
+ 					$sender.parents('.orphan-sidebar').slideUp( 400, function(){ $(this).remove(); } );
+ 				}
+-			}
++			},
++			out: function( event, ui ) {
++				if( ui.helper != undefined ) {
++	                                ui.item.remove();
++				}
++                        }
+ 		}).sortable( 'option', 'connectWith', 'div.widgets-sortables' );
+ 
+ 		$('#available-widgets').droppable({

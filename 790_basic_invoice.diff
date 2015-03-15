@@ -1,0 +1,354 @@
+Index: bootstrap.php
+===================================================================
+--- bootstrap.php	(revision 1142)
++++ bootstrap.php	(working copy)
+@@ -14,7 +14,9 @@
+ if ( is_admin() ) {
+ 	require_once( __DIR__ . '/classes/wordcamp-payments.php' );
+ 	require_once( __DIR__ . '/classes/payment-request.php' );
++	require_once( __DIR__ . '/classes/sponsor-invoice.php' );
+ 
+ 	$GLOBALS['wordcamp_payments']   = new WordCamp_Payments();
+ 	$GLOBALS['wcp_payment_request'] = new WCP_Payment_Request();
++	$GLOBALS['wcp_sponsor_invoice'] = new WCP_Sponsor_Invoice();
+ }
+Index: classes/sponsor-invoice.php
+===================================================================
+--- classes/sponsor-invoice.php	(revision 0)
++++ classes/sponsor-invoice.php	(working copy)
+@@ -0,0 +1,291 @@
++<?php
++/*
++ * Create Sponsor Invoice Post type
++ */
++class WCP_Sponsor_Invoice {
++	const POST_TYPE = 'wcp_sponsor_invoice';
++	
++	public function __construct() {
++		add_action( 'init', 		array( $this, 'register_post_type' ) );
++		add_action( 'init', 		array( __CLASS__, 'register_post_statuses') );
++		add_action( 'add_meta_boxes', 	array( $this, 'init_meta_boxes' ) );
++		add_action( 'save_post',        array( $this, 'save_invoice' ), 10, 2 );
++
++	}
++	
++	/**
++	 * Register the custom post type for sponsor invoices
++	 * 
++	 * @return object | WP_Error
++	 */	
++	public function register_post_type() {
++		$labels = array(
++			'name'               => _x( 'Sponsor Invoices', 'general sponsor invoices', 'wordcamporg' ),
++			'singular_name'      => _x( 'Sponsor Invoice', 'post type singular name', 'wordcamporg' ),
++			'menu_name'          => _x( 'Sponsor Invoices', 'admin menu', 'wordcamporg' ),
++			'name_admin_bar'     => _x( 'Sponsor Invoices', 'add new on admin bar', 'wordcamporg' ),
++			'add_new'            => _x( 'Add New', 'invoice', 'wordcamporg' ),
++			'add_new_item'       => __( 'Add New Sponsor Invoice', 'wordcamporg' ),
++			'new_item'           => __( 'New Invoice', 'wordcamporg' ),
++			'edit_item'          => __( 'Edit Invoice', 'wordcamporg' ),
++			'view_item'          => __( 'View Invoice', 'wordcamporg' ),
++			'all_items'          => __( 'All Invoices', 'wordcamporg' ),
++			'search_items'       => __( 'Search Invoices', 'wordcamporg' ),
++			'not_found'          => __( 'No invoice found.', 'wordcamporg' ),
++			'not_found_in_trash' => __( 'No invoice found in Trash.', 'wordcamporg' )
++		);
++
++		$args = array(
++			'labels'            => $labels,
++			'description'       => 'WordCamp Payment Sponsor Invoices',
++			'public'            => false,
++			'show_ui'           => true,
++			'show_in_nav_menus' => true,
++			'menu_position'     => 25,
++			'supports'          => array( 'title' ),
++			'has_archive'       => true,
++                );
++
++		return register_post_type( self::POST_TYPE, $args );
++	}
++
++        /**
++         * Register our custom post statuses
++         */
++	public static function register_post_statuses() {
++		register_post_status(
++			'Pre-Contact',
++			array(
++                                'label'              => _x( 'Pre-Contact', 'post', 'wordcamporg' ),
++                                'label_count'        => _nx_noop( 'Pre Contact <span class="count">(%s)</span>', 'Pre Contact <span class="count">(%s)</span>', 'wordcamporg' ),
++                                'public'             => true,
++                                'publicly_queryable' => false,
++                        )
++                );
++
++		register_post_status(
++			'Negotiation',
++			array(
++				'label'              => _x( 'Negotiation', 'post', 'wordcamporg' ),
++				'label_count'        => _nx_noop( 'Negotiation <span class="count">(%s)</span>', 'Negotiation <span class="count">(%s)</span>', 'wordcamporg' ),
++				'public'             => true,
++				'publicly_queryable' => false,
++                        )
++                );
++		register_post_status(
++			'Invoiced',
++			array(
++                                'label'              => _x( 'Invoiced', 'post', 'wordcamporg' ),
++                                'label_count'        => _nx_noop( 'Invoiced <span class="count">(%s)</span>', 'Invoiced <span class="count">(%s)</span>', 'wordcamporg' ),
++                                'public'             => true,
++                                'publicly_queryable' => false,
++                        )
++                );
++
++		register_post_status(
++			'Received Payment',
++			array(
++				'label'              => _x( 'Received Payment', 'post', 'wordcamporg' ),
++				'label_count'        => _nx_noop( 'Received Payment <span class="count">(%s)</span>', 'Received Payment <span class="count">(%s)</span>', 'wordcamporg' ),
++				'public'             => true,
++				'publicly_queryable' => false,
++                        )
++                );
++		register_post_status(
++			'Cancelled',
++			array(
++				'label'              => _x( 'Cancelled', 'post', 'wordcamporg' ),
++				'label_count'        => _nx_noop( 'Cancelled <span class="count">(%s)</span>', 'Cancelled <span class="count">(%s)</span>', 'wordcamporg' ),
++				'public'             => true,
++				'publicly_queryable' => false,
++                        )
++                );
++
++        }
++
++	/**
++	 * Add metaboxes for Sponsor Invoice
++	 *
++	 */
++	public function init_meta_boxes() {
++		add_meta_box(
++			'wcp_sponsor_invoice',
++			__( 'Sponsor Invoice', 'wordcamporg' ),
++			array( $this, 'render_sponsor_invoice_metabox' ),
++			self::POST_TYPE,
++			'normal',
++			'high'
++		);
++	}
++	
++	/**
++	 * Gets Sponsorship Types
++	 * 
++	 * @return array()
++	 */
++	public static function get_sponsorship_type() {
++		$types = array( 'money'		   => 'Money',
++				'in_kind_donation' => 'In-Kind Donation',
++				'other'		   => 'Other'
++				);
++		return $types;
++	}
++
++	/**
++	 * Render Sponsor Invoice Metabox
++	 * @param WP_Post $post
++	 *
++	 */
++	public function render_sponsor_invoice_metabox( $post ) {
++		wp_nonce_field( 'sponsor_invoice', 'sponsor_invoice_nonce' );
++		$categories = self::get_sponsorship_type();
++		$assigned_category = get_post_meta( $post->ID, '_campinvoices_sponsorship_type', true );
++
++		require_once( dirname( __DIR__ ) . '/views/payment-request/metabox-sponsor-invoice.php' );
++	}
++	/**
++	 * Render a <input type="text"> field with the given attributes.
++	 *
++	 * @param WP_Post $post
++	 * @param string $label
++	 * @param string $name
++	 */
++	protected function render_text_input( $post, $label, $name, $description = '', $variant = 'text', $row_classes = array(), $readonly = false ) {
++		$value = $this->get_field_value( $name, $post );
++		array_walk( $row_classes, 'sanitize_html_class' );
++		$row_classes = implode( ' ', $row_classes );
++
++		require( dirname( __DIR__ ) . '/views/payment-request/input-text.php' );
++	}
++
++	/**
++	 * Render a <select> field with the given attributes.
++	 *
++	 * @param WP_Post $post
++	 * @param string $label
++	 * @param string $name
++	 */
++	protected function render_select_input( $post, $label, $name ) {
++		$selected = get_post_meta( $post->ID, '_campinvoices_' . $name, true );
++		$options  = $this->get_field_value( $name, $post );
++
++		require( dirname( __DIR__ ) . '/views/payment-request/input-select.php' );
++	}
++
++	/**
++	 * Render a <textarea> field with the given attributes.
++	 *
++	 * @param WP_Post $post
++	 * @param string $label
++	 * @param string $name
++	 * @param string $description
++	 */
++	protected function render_textarea_input( $post, $label, $name, $description = '' ) {
++		$date = get_post_meta( $post->ID, '_campinvoices_' . $name, true );
++
++		require( dirname( __DIR__ ) . '/views/payment-request/input-textarea.php' );
++	}
++
++	/**
++	 * Render a <input type="checkbox"> field with the given attributes.
++	 *
++	 * @param WP_Post $post
++	 * @param string $label
++	 * @param string $name
++	 */
++	protected function render_checkbox_input( $post, $label, $name, $description = '' ) {
++		$value = $this->get_field_value( $name, $post );
++
++		require( dirname( __DIR__ ) . '/views/payment-request/input-checkbox.php' );
++	}
++
++	/**
++	 * Get the value of a given field.
++	 *
++	 * @param string $name
++	 * @param WP_Post $post
++	 *
++	 * @return mixed
++	 */
++	protected function get_field_value( $name, $post ) {
++		$value = get_post_meta( $post->ID, '_campinvoices_' . $name, true );
++
++		return $value;
++	}
++
++	/**
++	 * Save the post's data
++	 *
++	 * @param int     $post_id
++	 * @param WP_Post $post
++	 */
++	public function save_invoice( $post_id, $post ) {
++		// Verify nonces
++		$nonces = array( 'sponsor_invoice_nonce' );
++
++		foreach ( $nonces as $nonce ) {
++			if ( ! isset( $_POST[ $nonce ] ) || ! wp_verify_nonce( $_POST[ $nonce ], str_replace( '_nonce', '', $nonce ) ) ) {
++				return;
++			}
++		}
++
++		// Sanitize and save the field values
++		$this->sanitize_save_normal_fields( $post_id );
++		$this->sanitize_save_misc_fields(   $post_id );
++	}
++
++	/**
++	 * Sanitize and save values for all normal fields
++	 *
++	 * @param int $post_id
++	 */
++	protected function sanitize_save_normal_fields( $post_id ) {
++		foreach ( $_POST as $key => $unsafe_value ) {
++			switch ( $key ) {
++				case 'notes':
++					$safe_value = wp_kses( $unsafe_value, wp_kses_allowed_html( 'strip' ) );
++					break;
++
++				case 'contact_name':
++				case 'sponsor_email':
++				case 'company_name':
++				case 'sponsorship_level':
++				case 'coupon_code':
++				case 'received_amount':
++				case 'sponsorship_level':
++					$safe_value = sanitize_text_field( $unsafe_value );
++					break;
++
++				default:
++					$safe_value = null;
++					break;
++			}
++
++			if ( ! is_null( $safe_value ) ) {
++				update_post_meta( $post_id, '_campinvoices_' . $key, $safe_value );
++			}
++		}
++	}
++
++	/**
++	 * Sanitize and save values for all checkbox fields
++	 *
++	 * @param int $post_id
++	 */
++	protected function sanitize_save_misc_fields( $post_id ) {
++
++		// Checkboxes
++		$checkbox_fields = array( 'published_blog_post', 'published_logo', 'check_requested', 'check_sent' );
++		foreach( $checkbox_fields as $field ) {
++			if ( isset( $_POST[ $field ] ) ) {
++				update_post_meta( $post_id, '_campinvoices_' . $field, $_POST[ $field ] );
++			} else {
++				delete_post_meta( $post_id, '_campinvoices_' . $field );
++			}
++		}
++	}
++
++
++}
++
++?>
+Index: views/payment-request/metabox-sponsor-invoice.php
+===================================================================
+--- views/payment-request/metabox-sponsor-invoice.php	(revision 0)
++++ views/payment-request/metabox-sponsor-invoice.php	(working copy)
+@@ -0,0 +1,39 @@
++<table class="form-table">
++	<?php
++			$this->render_text_input( $post, 'Contact Name', 'contact_name', '', 'text', array(), false );
++			$this->render_text_input( $post, 'Sponsor Email', 'sponsor_email', '', 'email', array(), false );
++			$this->render_text_input( $post, 'Company Name', 'company_name', '', 'text', array(), false);
++			$this->render_textarea_input( $post, 'Notes', 'notes' , '' );
++			$this->render_text_input( $post, 'Sponsorship Level', 'sponsorship_level', '', 'text', array(), false);
++			$this->render_checkbox_input( $post, 'Published Blog Post', 'published_blog_post', 'Published Blog Post' );
++			$this->render_checkbox_input( $post, 'Published Logo', 'published_logo', 'Published Logo' );
++			$this->render_text_input( $post, 'Coupon Code', 'coupon_code', '', 'text', array(), false);
++			$this->render_checkbox_input( $post, 'Check Requested', 'check_requested', 'Check Requested' );
++			$this->render_checkbox_input( $post, 'Check Sent', 'check_sent', 'Check Sent' );
++			$this->render_text_input( $post, 'Received Amount', 'received_amount', '', 'text', array(), false);
++	?>
++
++	<tr>
++		<th><label for="sponsorship_type">Sponsorship Type</label></th>
++		<td>
++			<select name="sponsorship_type" id="sponsorship_type" class="postform">
++				<option value="null">-- Select a Category --</option>
++
++				<?php foreach( $categories as $key => $name ) : ?>
++					<option value="<?php echo esc_attr( $key ); ?>" <?php selected( $assigned_category, $key ); ?>><?php echo esc_html( $name ); ?></option>
++				<?php endforeach; ?>
++			</select>
++		</td>
++	</tr>
++
++	<?php
++		$this->render_text_input(
++			$post,
++			'Other Category',
++			'other_category_explanation',
++			__( 'Please describe what category this request fits under.', 'wordcamporg' ),
++			'text',
++			isset( $assigned_category->name ) && 'Other' == $assigned_category->name ? array() : array( 'hidden')
++		);
++	?>
++</table>
